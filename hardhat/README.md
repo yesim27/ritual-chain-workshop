@@ -1,57 +1,78 @@
-# Sample Hardhat 3 Project (`node:test` and `viem`)
+# Privacy-Preserving AI Bounty Judge
 
-This project showcases a Hardhat 3 project using the native Node.js test runner (`node:test`) and the `viem` library for Ethereum interactions.
+A commit-reveal bounty system on Ritual Chain where submissions stay hidden until judging is complete.
 
-To learn more about Hardhat 3, please visit the [Getting Started guide](https://hardhat.org/docs/getting-started#getting-started-with-hardhat-3). To share your feedback, join our [Hardhat 3](https://hardhat.org/hardhat3-telegram-group) Telegram group or [open an issue](https://github.com/NomicFoundation/hardhat/issues/new) in our GitHub issue tracker.
+## Problem
 
-## Project Overview
+In a standard bounty system, answers are public immediately after submission. Later participants can read earlier answers, copy ideas, and submit improved versions. This is unfair.
 
-This example project includes:
+## Solution: Commit-Reveal Flow
 
-- A simple Hardhat configuration file.
-- Foundry-compatible Solidity unit tests.
-- TypeScript integration tests using [`node:test`](nodejs.org/api/test.html), the new Node.js native test runner, and [`viem`](https://viem.sh/).
-- Examples demonstrating how to connect to different types of networks, including locally simulating OP mainnet.
+Instead of submitting answers directly, participants submit a **commitment hash** during the submission phase. The real answer stays hidden until the reveal phase.
 
-## Usage
-
-### Running Tests
-
-To run all the tests in the project, execute the following command:
-
-```shell
-npx hardhat test
+### Commitment Formula
+```solidity
+bytes32 commitment = keccak256(abi.encodePacked(answer, salt, msg.sender, bountyId));
 ```
 
-You can also selectively run the Solidity or `node:test` tests:
+Including `msg.sender` and `bountyId` prevents copying another participant's commitment.
 
-```shell
-npx hardhat test solidity
-npx hardhat test nodejs
-```
+## Bounty Lifecycle
 
-### Make a deployment to Sepolia
+1. **Create** — Owner creates a bounty with title, rubric, submission deadline, and reveal deadline.
+2. **Commit** — Participants submit only a hash before the submission deadline.
+3. **Reveal** — After submission deadline, participants reveal their answer + salt.
+4. **Judge** — After reveal deadline, owner calls `judgeAll()`. Ritual AI judges all revealed answers together.
+5. **Finalize** — Owner calls `finalizeWinner()` with the winner index. Reward is paid automatically.
 
-This project includes an example Ignition module to deploy the contract. You can deploy this module to a locally simulated chain or to Sepolia.
+## Smart Contract Functions
 
-To run the deployment to a local chain:
+| Function | Phase | Who |
+|---|---|---|
+| `createBounty()` | Setup | Owner |
+| `submitCommitment()` | Submission | Participant |
+| `revealAnswer()` | Reveal | Participant |
+| `judgeAll()` | Judging | Owner |
+| `finalizeWinner()` | Finalization | Owner |
 
-```shell
-npx hardhat ignition deploy ignition/modules/Counter.ts
-```
+## Architecture Comparison
 
-To run the deployment to Sepolia, you need an account with funds to send the transaction. The provided Hardhat configuration includes a Configuration Variable called `SEPOLIA_PRIVATE_KEY`, which you can use to set the private key of the account you want to use.
+### Commit-Reveal (Required Track)
+- Answers hidden during submission phase ✅
+- Answers become public before AI judging ⚠️
+- Works on any EVM chain
+- No external dependencies
 
-You can set the `SEPOLIA_PRIVATE_KEY` variable using the `hardhat-keystore` plugin or by setting it as an environment variable.
+### Ritual-Native TEE (Advanced Track)
+- Answers stay encrypted until after AI judging ✅
+- TEE executor decrypts submissions privately ✅
+- AI judges without participants seeing each other's answers ✅
+- Requires Ritual Chain infrastructure
 
-To set the `SEPOLIA_PRIVATE_KEY` config variable using `hardhat-keystore`:
+## Reflection
 
-```shell
-npx hardhat keystore set SEPOLIA_PRIVATE_KEY
-```
+In a bounty system, the **bounty details** (title, rubric, deadline) should be fully public so participants know what to build. **Submissions** should stay hidden during the submission phase to prevent copying. The **judging process** should be decided by AI for objectivity and speed, but the **final winner selection** should require human confirmation by the owner — AI can recommend, but a human should verify the result before funds are released. This hybrid approach balances automation with accountability.
 
-After setting the variable, you can run the deployment with the Sepolia network:
+## Test Plan
 
-```shell
-npx hardhat ignition deploy --network sepolia ignition/modules/Counter.ts
-```
+### Valid Cases
+- Create bounty with correct deadlines → succeeds
+- Submit commitment before deadline → succeeds
+- Reveal answer with correct salt → succeeds
+- Duplicate commitment rejected → reverts
+- Wrong salt on reveal → reverts
+- Reveal after reveal deadline → reverts
+- judgeAll before reveal deadline → reverts
+- finalizeWinner with unrevealed winner → reverts
+- Winner receives correct reward → verified
+
+## Contracts
+
+| Contract | Description |
+|---|---|
+| `AIJudge.sol` | Original workshop contract (public submissions) |
+| `PrivacyBountyJudge.sol` | Commit-reveal version (hidden submissions) |
+
+## Network
+
+Ritual Chain Testnet — Chain ID: 1979
